@@ -1,0 +1,131 @@
+version: '3.7'
+
+
+volumes:
+    prometheus_data: {}
+    grafana_data: {}
+    promalert_data: {}
+
+networks:
+  front-tier:
+  back-tier:
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v2.36.2
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/alert.rules:/etc/prometheus/alert.rules
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - 9090:9090
+    user: "root"
+    networks:
+      - back-tier
+    labels:
+      org.label-schema.group: "observability"
+
+
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - 9100:9100
+    networks:
+      - back-tier
+    labels:
+      org.label-schema.group: "observability"
+
+  alertmanager:
+    image: prom/alertmanager:v0.24.0
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/config.yml
+      - promalert_data:/alertmanager
+    networks:
+      - back-tier
+    ports:
+      - 9093:9093
+    user: "root"
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    labels:
+      org.label-schema.group: "observability"
+
+  grafana:
+    image: grafana/grafana:8.5.6
+    user: "root"
+    ports:
+      - 3000:3000
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/plugins:/var/lib/grafana/plugins
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+    env_file:
+      - ./grafana/config.monitoring
+    networks:
+      - back-tier
+      - front-tier
+    labels:
+      org.label-schema.group: "observability"
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  cadvisor:
+    image: google/cadvisor:latest
+    volumes:
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - 8080:8080
+
+  db:
+    image: timescale/timescaledb-ha:pg14-latest
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_USER: postgres
+    # ports:
+    #   - 5432:5432/tcp
+
+  promscale:
+    # TODO: Use docker image with Jaeger gRPC remote store support after 0.14.0 release.
+    image: timescale/promscale:latest
+    restart: on-failure
+    depends_on:
+      - db
+    environment:
+      PROMSCALE_DB_URI: postgres://postgres:password@db:5432/postgres?sslmode=allow
+      PROMSCALE_TRACING_OTLP_SERVER_ADDRESS: ":9202"
+    # ports:
+    #   - 9201:9201/tcp
+    #   - 9202:9202/tcp
+
+
+
+#  servicenow-webhook:
+#    image: montdata/montd-alert-snow-whook:0.1.0
+#    ports:
+#      - "9877:9877"
+#    networks:
+#      - back-tier
+#    labels:
+#      org.label-schema.group: "observability"
+

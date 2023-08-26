@@ -1,0 +1,19 @@
+global:
+  resolve_timeout: 5m
+route:
+  group_by: ['job','db','inst','instance','host', 'fra_path','tablespace','object_name']
+  group_wait: 1m
+  group_interval: 1m
+  repeat_interval: 1h
+  receiver: 'webhook'
+receivers:
+- name: 'webhook'
+  webhook_configs:
+  - url: 'http://alert-api:8080/alerts'
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'dev', 'instance']
+
